@@ -384,5 +384,69 @@ if (template === ROUTER) {
     initApp = pageDef?.init;
 }
 
+/**
+ * Applies allowlists to Portal menu items.
+ *
+ * The sidebar allowlist modifies the list of items presented in the
+ * Tab Selection sidebar.
+ * 
+ * The primary allowlist determines which of the items in 
+ * the sidebar should be used as default tabs in the top bar. It
+ * must only contain a subset of items from the sidebar allowlist.
+ * 
+ * The Results tab is managed separately and should not be included 
+ * in either list.
+ *
+ * - Omitted, null, or non-array allowlist: Preserves existing behavior.
+ * - Empty array: Removes all configurable menu items.
+ * - Empty sidebar list: Removes all configurable menu items.
+ * - Empty primary list: Retains the menu but marks no items primary.
+ * Extra primary actions are silently ignored.
+ * - Non-empty allowlist identifies menu items by case-sensitive
+ * matches against their `action` properties.
+ * 
+ * @param {object[]} menu Menu items to process.
+ * @param {object} [options={}] Application options.
+ * @param {?string[]} [options.rubinSidebarMenuItemAllowlist]
+ *     Actions permitted in the sidebar.
+ * @param {?string[]} [options.rubinPrimaryMenuItemAllowlist]
+ *     Actions displayed as primary top-bar tabs.
+ * @returns {object[]} The filtered menu with applicable overrides.
+ */
+
+export function applyMenuAllowlists(menu, options = {}) {
+    const {
+        rubinSidebarMenuItemAllowlist,
+        rubinPrimaryMenuItemAllowlist
+    } = options;
+
+    const filterMenu = Array.isArray(rubinSidebarMenuItemAllowlist);
+    const setPrimary = Array.isArray(rubinPrimaryMenuItemAllowlist);
+
+    // If no overrides are provided, use existing defaults; return menu unchanged
+    if (!filterMenu && !setPrimary) return menu;
+
+    // Otherwise, replace the hard-coded menu items with those provided
+    const allowed = filterMenu ? new Set(rubinSidebarMenuItemAllowlist) : undefined;
+    const primary = setPrimary ? new Set(rubinPrimaryMenuItemAllowlist) : undefined;
+
+    return menu
+        .filter(({action}) => !filterMenu || allowed.has(action))
+        .map((item) => ({
+            ...item,
+            ...(filterMenu && {enabled: true}),
+            ...(setPrimary && {primary: primary.has(item.action)})
+        }));
+}
+
+/**
+ * Apply menu overrides
+ */
+props = {
+    ...props,
+    menu: applyMenuAllowlists(props.menu, options),
+};
+
+
 firefly.bootstrap(props, options, apiCommands).then(() => initApp?.());
 

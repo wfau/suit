@@ -109,6 +109,8 @@ jobs:
       # Build (and optionally push) multi-platform image
       # ------------------------------------------------------------
       - name: Build and push image
+        # Make this step conditional
+        if: github.event_name == 'release' || inputs.push_image 
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -122,3 +124,39 @@ jobs:
             target=-Psso.auth.required=false :suit:warAll
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      
+      # WFAU - Add two further steps to produce a single-plaform image artifact    
+      
+      # ------------------------------------------------------------
+      # Manually triggered job to build single-plaform image 
+      # ------------------------------------------------------------
+      - name: Build downloadable image
+        if: github.event_name == 'workflow_dispatch' && inputs.push_image == false
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: firefly/docker/Dockerfile
+          # Single platform image
+          platforms: linux/amd64 
+          push: false
+          tags: ghcr.io/${{ github.repository }}:${{ steps.resolve_tags.outputs.tag }}
+          outputs: type=docker,dest=${{ runner.temp }}/suit-image.tar
+          build-args: |
+            env=ops
+            build_dir=suit
+            target=-Psso.auth.required=false :suit:warAll
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ------------------------------------------------------------
+      # Upload single-platform image as artifact
+      # ------------------------------------------------------------
+      - name: Upload downloadable image
+        if: github.event_name == 'workflow_dispatch' && inputs.push_image == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: suit-image-${{ github.run_id }}
+          path: ${{ runner.temp }}/suit-image.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
