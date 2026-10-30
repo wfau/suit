@@ -384,67 +384,112 @@ if (template === ROUTER) {
     initApp = pageDef?.init;
 }
 
+
 /**
- * Applies allowlists to Portal menu items.
- *
- * The sidebar allowlist modifies the list of items presented in the
- * Tab Selection sidebar.
- * 
- * The primary allowlist determines which of the items in 
- * the sidebar should be used as default tabs in the top bar. It
- * must only contain a subset of items from the sidebar allowlist.
- * 
- * The Results tab is managed separately and should not be included 
- * in either list.
- *
- * - Omitted, null, or non-array allowlist: Preserves existing behavior.
- * - Empty array: Removes all configurable menu items.
- * - Empty sidebar list: Removes all configurable menu items.
- * - Empty primary list: Retains the menu but marks no items primary.
- * Extra primary actions are silently ignored.
- * - Non-empty allowlist identifies menu items by case-sensitive
- * matches against their `action` properties.
- * 
- * @param {object[]} menu Menu items to process.
- * @param {object} [options={}] Application options.
- * @param {?string[]} [options.rubinSidebarMenuItemAllowlist]
- *     Actions permitted in the sidebar.
- * @param {?string[]} [options.rubinPrimaryMenuItemAllowlist]
- *     Actions displayed as primary top-bar tabs.
- * @returns {object[]} The filtered menu with applicable overrides.
+ * -------------------
+ * Support for WFAU topbar tab and tab selection sidebar preferences.
+ * See WFAU Portal statefulset.yaml for usage.
+ * -------------------
  */
 
-export function applyMenuAllowlists(menu, options = {}) {
-    const {
-        rubinSidebarMenuItemAllowlist,
-        rubinPrimaryMenuItemAllowlist
-    } = options;
-
-    const filterMenu = Array.isArray(rubinSidebarMenuItemAllowlist);
-    const setPrimary = Array.isArray(rubinPrimaryMenuItemAllowlist);
-
-    // If no overrides are provided, use existing defaults; return menu unchanged
-    if (!filterMenu && !setPrimary) return menu;
-
-    // Otherwise, replace the hard-coded menu items with those provided
-    const allowed = filterMenu ? new Set(rubinSidebarMenuItemAllowlist) : undefined;
-    const primary = setPrimary ? new Set(rubinPrimaryMenuItemAllowlist) : undefined;
-
-    return menu
-        .filter(({action}) => !filterMenu || allowed.has(action))
-        .map((item) => ({
-            ...item,
-            ...(filterMenu && {enabled: true}),
-            ...(setPrimary && {primary: primary.has(item.action)})
-        }));
+/**
+ * Resolves an `enabled` or `primary` menu item property.
+ *
+ * @param {boolean|function(object): boolean|null|undefined} value
+ *     Original property value or callback.
+ * @param {object} item Menu item passed to the callback.
+ * @param {boolean} defaultValue Value used when `value` is null or undefined.
+ * @returns {boolean} The resolved property value.
+ */
+function evaluateMenuFlag(value, item, defaultValue) {
+    if (typeof value === 'function') return value(item);
+    return value ?? defaultValue;
 }
 
 /**
- * Apply menu overrides
+ * Replaces the `enabled` and `primary` property of each menu item with
+ * callbacks that read the current application options when evaluated.
+ *
+ * A sidebar allowlist controls which items are enabled. A primary
+ * allowlist controls which enabled items are primary.
+ * ("primary" means included in default in topbar tabs)
+ *
+ * Omitted, null, or non-array allowlists preserve existing behaviour.
+ * An empty sidebar allowlist disables every menu item.
+ * An empty primary allowlist makes every menu item non-primary.
+ *
+ * @param {object[]} menu Menu items to process.
+ * @param {function(): object} [optionsProvider=getAppOptions]
+ *     Returns the current application options.
+ * @returns {object[]} A new menu array with deferred flag callbacks.
+ */
+export function applyMenuAllowlists(menu, optionsProvider = getAppOptions) {
+    return menu.map((item) => {
+        const {
+            enabled: originalEnabled,
+            primary: originalPrimary
+        } = item;
+
+        // Save original properties for the item
+        return {
+            ...item,
+
+            // Update `enabled` if sidebar allowlist exists
+            enabled: (currentItem) => {
+                const {
+                    rubinSidebarMenuItemAllowlist
+                } = optionsProvider() ?? {};
+
+                if (Array.isArray(rubinSidebarMenuItemAllowlist)) {
+                    return rubinSidebarMenuItemAllowlist.includes(item.action)
+                }
+
+                return evaluateMenuFlag(
+                    originalEnabled,
+                    currentItem,
+                    true
+                );
+        
+            },
+
+            // Update `primary` if item is in sidebar allowlist and primary allowlist
+            primary: (currentItem) => {
+                const {
+                    rubinSidebarMenuItemAllowlist,
+                    rubinPrimaryMenuItemAllowlist
+                } = optionsProvider() ?? {};
+
+                // If item not in sidebar allowlist, it can't be made primary
+                if (
+                    Array.isArray(rubinSidebarMenuItemAllowlist) &&
+                    !rubinSidebarMenuItemAllowlist.includes(item.action)
+                ) {
+                    return false;
+                }
+
+                if (Array.isArray(rubinPrimaryMenuItemAllowlist)) {
+                    return rubinPrimaryMenuItemAllowlist.includes(item.action);
+                }
+                
+                // Resolve menu items
+                return evaluateMenuFlag(
+                    originalPrimary,
+                    currentItem,
+                    true
+                );
+
+            }
+        };
+    
+    });
+}
+
+/**
+ * Install deferred menu allowlist callbacks prior to bootstrap
  */
 props = {
     ...props,
-    menu: applyMenuAllowlists(props.menu, options),
+    menu: applyMenuAllowlists(props.menu),
 };
 
 
